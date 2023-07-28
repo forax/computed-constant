@@ -8,7 +8,7 @@ import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
-public sealed interface ComputedConstant<V> permits IndexedComputedConstant {
+public sealed interface ComputedConstant<V> extends Supplier<V> permits IndexedComputedConstant {
   V get();
   V orElse(V other);
   <X extends Throwable> V orElseThrow(Supplier<? extends X> exceptionSupplier) throws X;
