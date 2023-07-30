@@ -1,4 +1,4 @@
-package com.fithub.forax.concurrent.constant;
+package com.github.forax.concurrent.constant;
 
 import java.util.List;
 import java.util.Objects;

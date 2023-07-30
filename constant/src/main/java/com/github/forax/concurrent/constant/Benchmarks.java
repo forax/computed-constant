@@ -1,4 +1,4 @@
-package com.fithub.forax.concurrent.constant;
+package com.github.forax.concurrent.constant;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -30,8 +30,8 @@ public class Benchmarks {
   private static final Integer STATIC_CONSTANT_42 = 42;
   private static final ComputedConstant<Integer> STATIC_COMPUTED_42 = ComputedConstant.of(() -> 42);
 
-  private static final Integer STATIC_CONSTANT_NULL = null;
-  private static final ComputedConstant<Integer> STATIC_COMPUTED_NULL = ComputedConstant.of(() -> null);
+  private static final Object STATIC_CONSTANT_NULL = null;
+  private static final ComputedConstant<Object> STATIC_COMPUTED_NULL = ComputedConstant.of(() -> null);
 
   @Benchmark
   public int static_constant_get_42() {

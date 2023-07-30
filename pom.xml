@@ -6,7 +6,11 @@
 
     <groupId>com.github.forax.concurrent.constant</groupId>
     <artifactId>computed-constant</artifactId>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
+    <modules>
+        <module>field-init</module>
+        <module>constant</module>
+    </modules>
     <version>1.0-SNAPSHOT</version>
 
     <properties>
