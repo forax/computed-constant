@@ -14,13 +14,7 @@ import static java.lang.invoke.MethodHandles.dropArguments;
 import static java.lang.invoke.MethodType.methodType;
 
 record FieldInitImpl(MethodHandle mh) implements FieldInit {
-  public static MethodHandle createStaticMH(Lookup lookup) {
-    var fieldInit = findStaticFieldInit(lookup);
-    var computedMap = new ConcurrentHashMap<String, StaticInliningCache.Computed>();
-    return new StaticInliningCache(lookup, fieldInit, computedMap).dynamicInvoker();
-  }
-
-  private static MethodHandle findStaticFieldInit(Lookup lookup) {
+  static MethodHandle findStaticFieldInit(Lookup lookup) {
     try {
       return lookup.findStatic(lookup.lookupClass(), "$staticFieldInit$", methodType(Object.class, String.class));
     } catch (NoSuchMethodException e) {
@@ -28,6 +22,56 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
     } catch (IllegalAccessException e) {
       throw (IllegalAccessError) new IllegalAccessError().initCause(e);
     }
+  }
+
+  record State(Throwable throwable, Object result) {}
+
+  static final class Computed {
+    // 2 states: null -> STATE
+
+    State state;
+  }
+
+  private static Object callStaticFieldInit(String fieldName, MethodHandle fieldInit) throws Throwable {
+    try {
+      return fieldInit.invokeExact(fieldName);
+    } catch (Exception e) {
+      throw new ExceptionInInitializerError(e);
+    }
+  }
+
+  static Object computeIfUnbound(ConcurrentHashMap<String, Computed> computedMap, String fieldName, MethodHandle fieldInit, MethodHandle staticSetter) throws Throwable {
+    var computed = computedMap.computeIfAbsent(fieldName, __ -> new Computed());
+    synchronized (computed) {
+      if (computed.state == null) {
+        try {
+          // 1. call static field init
+          var value = callStaticFieldInit(fieldName, fieldInit);
+
+          // 2. set static value
+          if (staticSetter != null) {
+            staticSetter.invoke(value);
+          }
+
+          computed.state = new State(null, value);
+          return value;
+        } catch (Throwable throwable) {
+          computed.state = new State(throwable, null);
+          throw throwable;
+        }
+      }
+      if (computed.state.throwable != null) {
+        throw computed.state.throwable;
+      }
+      return computed.state.result;
+    }
+  }
+
+
+  public static MethodHandle createStaticMH(Lookup lookup) {
+    var fieldInit = findStaticFieldInit(lookup);
+    var computedMap = new ConcurrentHashMap<String, Computed>();
+    return new StaticInliningCache(lookup, fieldInit, computedMap).dynamicInvoker();
   }
 
   @Override
@@ -59,14 +103,6 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
       }
     }
 
-    private record State(Throwable throwable, Object result) {}
-
-    private static final class Computed {
-      // 2 states: null -> STATE
-
-      State state;
-    }
-
     private final ConcurrentHashMap<String, Computed> computedMap;
 
     private final Lookup lookup;
@@ -82,41 +118,6 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
 
     private static boolean stringCheck(String expected, String argument) {
       return expected == argument;
-    }
-
-    private Object computeIfUnbound(Field field, MethodHandle fieldInit) throws Throwable {
-      var fieldName = field.getName();
-      var computed = computedMap.computeIfAbsent(fieldName, __ -> new Computed());
-      synchronized (computed) {
-        if (computed.state == null) {
-          try {
-            // 1. call static field init
-            var value = callStaticFieldInit(fieldName, fieldInit);
-
-            // 2. set static value
-            var staticSetter = lookup.findStaticSetter(field.getDeclaringClass(), fieldName, field.getType());
-            staticSetter.invoke(value);
-
-            computed.state = new State(null, value);
-            return value;
-          } catch (Throwable throwable) {
-            computed.state = new State(throwable, null);
-            throw throwable;
-          }
-        }
-        if (computed.state.throwable != null) {
-          throw computed.state.throwable;
-        }
-        return computed.state.result;
-      }
-    }
-
-    private static Object callStaticFieldInit(String fieldName, MethodHandle fieldInit) throws Throwable {
-      try {
-        return fieldInit.invokeExact(fieldName);
-      } catch (Exception e) {
-        throw new ExceptionInInitializerError(e);
-      }
     }
 
     private Object staticFallback(String fieldName) throws Throwable {
@@ -136,7 +137,8 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
       }
 
       // 2. compute value and set field
-      var value = computeIfUnbound(field, fieldInit);
+      var staticSetter = lookup.findStaticSetter(field.getDeclaringClass(), fieldName, field.getType());
+      var value = computeIfUnbound(computedMap, field.getName(), fieldInit, staticSetter);
 
       // 3. install the guard
       var target = dropArguments(
