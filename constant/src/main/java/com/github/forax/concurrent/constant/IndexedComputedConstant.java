@@ -96,7 +96,9 @@ record IndexedComputedConstant<V>(List<Object> states, int index, IntFunction<? 
   @Override
   @SuppressWarnings("unchecked")
   public V get() {
-    var state = this.states.get(index);
+    var states = this.states;
+    var elements = (Object[]) UNSAFE.getObject(states, ELEMENTS_OFFSET);
+    var state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
     if (state == null) {
       state = computeIfUnbound();
     }
@@ -117,7 +119,9 @@ record IndexedComputedConstant<V>(List<Object> states, int index, IntFunction<? 
   @Override
   @SuppressWarnings("unchecked")
   public V orElse(V other) {
-    var state = this.states.get(index);
+    var states = this.states;
+    var elements = (Object[]) UNSAFE.getObject(states, ELEMENTS_OFFSET);
+    var state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
     if (state == null) {
       state = computeIfUnbound();
     }
@@ -133,7 +137,9 @@ record IndexedComputedConstant<V>(List<Object> states, int index, IntFunction<? 
   @Override
   @SuppressWarnings("unchecked")
   public <X extends Throwable> V orElseThrow(Supplier<? extends X> exceptionSupplier) throws X {
-    var state = this.states.get(index);
+    var states = this.states;
+    var elements = (Object[]) UNSAFE.getObject(states, ELEMENTS_OFFSET);
+    var state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
     if (state == null) {
       state = computeIfUnbound();
     }
