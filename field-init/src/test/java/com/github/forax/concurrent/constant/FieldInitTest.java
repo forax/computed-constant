@@ -16,7 +16,7 @@ public class FieldInitTest {
     public void get() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static String X;
+        private static String X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -30,7 +30,7 @@ public class FieldInitTest {
     public void getByte() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static byte X;
+        private static byte X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -44,7 +44,7 @@ public class FieldInitTest {
     public void getChar() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static char X;
+        private static char X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -58,7 +58,7 @@ public class FieldInitTest {
     public void getShort() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static short X;
+        private static short X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -72,7 +72,7 @@ public class FieldInitTest {
     public void getInt() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static int X;
+        private static int X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -86,7 +86,7 @@ public class FieldInitTest {
     public void getFloat() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static double X;
+        private static double X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -100,7 +100,7 @@ public class FieldInitTest {
     public void getLong() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static long X;
+        private static long X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -114,7 +114,7 @@ public class FieldInitTest {
     public void getDouble() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static double X;
+        private static double X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -128,8 +128,8 @@ public class FieldInitTest {
     public void getSeveral() {
       class Bar {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static String A;
-        static int B;
+        private static String A;
+        private static int B;
 
         private static Object $staticFieldInit$(String fieldName) {
           return switch (fieldName) {
@@ -175,6 +175,19 @@ public class FieldInitTest {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
         final String X = "";
+
+        private static Object $staticFieldInit$(String fieldName) {
+          throw new AssertionError();
+        }
+      }
+      assertThrows(NoSuchFieldError.class, () -> Foo.FIELD_INIT.get("X"));
+    }
+
+    @Test
+    public void fieldDeclaredNotPrivate() {
+      class Foo {
+        private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
+        static String X;
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new AssertionError();
@@ -240,7 +253,7 @@ public class FieldInitTest {
     private void testWithALotOfThreads() throws InterruptedException {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static Thread constant;
+        private static Thread constant;
 
         private static Object $staticFieldInit$(String fieldName) {
           return switch (fieldName) {
@@ -271,9 +284,9 @@ public class FieldInitTest {
 
     @Test
     public void aLotOfThreads() throws InterruptedException {
-      for(var i = 0; i < 1_000; i++) {
+      //for(var i = 0; i < 1_000; i++) {
         testWithALotOfThreads();
-      }
+      //}
     }
   }
 

@@ -3,7 +3,7 @@ package com.github.forax.concurrent.constant;
 import java.lang.invoke.MethodHandles;
 import java.util.Objects;
 
-public sealed interface FieldInit permits FieldInitImpl {
+public sealed interface FieldInit permits FieldInitImpl, FieldInitMetafactory.FieldInitNotImplemented {
   <T> T get(String fieldName);
   default double getBoolean(String fieldName) {
     return get(fieldName);

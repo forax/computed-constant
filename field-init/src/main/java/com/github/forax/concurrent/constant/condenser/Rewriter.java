@@ -30,10 +30,12 @@ import static org.objectweb.asm.Opcodes.POP;
 
 public class Rewriter {
   private static final String FIELD_INIT_INTERNAL_NAME = FieldInit.class.getName().replace('.', '/');
+  private static final String FIELD_INIT_METAFACTORY_INTERNAL_NAME = FieldInitMetafactory.class.getName().replace('.', '/');
   private static final Set<String> GET_NAMES;
 
   private static final String OF_STATIC;
   private static final String OF_STATIC_DESCRIPTOR;
+  private static final String OF_NOT_IMPLEMENTED;
 
   private static final Handle BSM;
 
@@ -66,15 +68,18 @@ public class Rewriter {
         getDouble.getName() + getDouble.getMethodType().descriptorString()
     );
 
-    MethodHandleInfo ofStatic;
+    MethodHandleInfo ofStatic, ofNotImplemented;
     try {
       ofStatic = lookup.revealDirect(lookup.findStatic(FieldInit.class, "ofStatic",
           methodType(FieldInit.class, Lookup.class)));
+      ofNotImplemented = lookup.revealDirect(lookup.findStatic(FieldInitMetafactory.class, "ofNotImplemented",
+          ofStatic.getMethodType()));
     } catch (NoSuchMethodException | IllegalAccessException e) {
       throw new AssertionError(e);
     }
     OF_STATIC = ofStatic.getName();
     OF_STATIC_DESCRIPTOR = ofStatic.getMethodType().descriptorString();
+    OF_NOT_IMPLEMENTED = ofNotImplemented.getName();
 
     MethodHandleInfo bsm;
     try {
@@ -205,7 +210,7 @@ public class Rewriter {
               }
 
               super.visitInsn(POP);  // pop the String
-              super.visitInsn(POP);  // pop the FieldInit (null at runtime)
+              super.visitInsn(POP);  // pop the FieldInit
               var fieldDescriptor = MethodTypeDesc.ofDescriptor(descriptor).returnType().descriptorString();
               super.visitLdcInsn(new ConstantDynamic(constant, fieldDescriptor, BSM));
               changed = true;
@@ -216,8 +221,7 @@ public class Rewriter {
                 owner.equals(FIELD_INIT_INTERNAL_NAME) &&
                 name.equals(OF_STATIC) &&
                 descriptor.equals(OF_STATIC_DESCRIPTOR)) {
-              super.visitInsn(POP);  // pop the Lookup
-              super.visitInsn(ACONST_NULL);
+              super.visitMethodInsn(opcode, FIELD_INIT_METAFACTORY_INTERNAL_NAME, OF_NOT_IMPLEMENTED, descriptor, false);
               changed = true;
               return;
             }

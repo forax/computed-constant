@@ -1,5 +1,7 @@
 package com.github.forax.concurrent.constant;
 
+import com.github.forax.concurrent.constant.FieldInitMetafactory.Computed;
+
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodHandles.Lookup;
@@ -14,64 +16,12 @@ import static java.lang.invoke.MethodHandles.dropArguments;
 import static java.lang.invoke.MethodType.methodType;
 
 record FieldInitImpl(MethodHandle mh) implements FieldInit {
-  static MethodHandle findStaticFieldInit(Lookup lookup) {
-    try {
-      return lookup.findStatic(lookup.lookupClass(), "$staticFieldInit$", methodType(Object.class, String.class));
-    } catch (NoSuchMethodException e) {
-      throw (NoSuchMethodError) new NoSuchMethodError().initCause(e);
-    } catch (IllegalAccessException e) {
-      throw (IllegalAccessError) new IllegalAccessError().initCause(e);
-    }
-  }
-
-  record State(Throwable throwable, Object result) {}
-
-  static final class Computed {
-    // 2 states: null -> STATE
-
-    State state;
-  }
-
-  private static Object callStaticFieldInit(String fieldName, MethodHandle fieldInit) throws Throwable {
-    try {
-      return fieldInit.invokeExact(fieldName);
-    } catch (Exception e) {
-      throw new ExceptionInInitializerError(e);
-    }
-  }
-
-  static Object computeIfUnbound(ConcurrentHashMap<String, Computed> computedMap, String fieldName, MethodHandle fieldInit, MethodHandle staticSetter) throws Throwable {
-    var computed = computedMap.computeIfAbsent(fieldName, __ -> new Computed());
-    synchronized (computed) {
-      if (computed.state == null) {
-        try {
-          // 1. call static field init
-          var value = callStaticFieldInit(fieldName, fieldInit);
-
-          // 2. set static value
-          if (staticSetter != null) {
-            staticSetter.invoke(value);
-          }
-
-          computed.state = new State(null, value);
-          return value;
-        } catch (Throwable throwable) {
-          computed.state = new State(throwable, null);
-          throw throwable;
-        }
-      }
-      if (computed.state.throwable != null) {
-        throw computed.state.throwable;
-      }
-      return computed.state.result;
-    }
-  }
-
 
   public static MethodHandle createStaticMH(Lookup lookup) {
-    var fieldInit = findStaticFieldInit(lookup);
-    var computedMap = new ConcurrentHashMap<String, Computed>();
-    return new StaticInliningCache(lookup, fieldInit, computedMap).dynamicInvoker();
+    var fieldInitData = FieldInitMetafactory.getFieldInitData(lookup);
+
+    var fieldInit = fieldInitData.staticFieldInit(lookup);
+    return new StaticInliningCache(lookup, fieldInit, fieldInitData.computedMap).dynamicInvoker();
   }
 
   @Override
@@ -121,7 +71,12 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
     }
 
     private Object staticFallback(String fieldName) throws Throwable {
-      // 1. find static field
+      // 1. fieldName is a constant string ?
+      if (fieldName != fieldName.intern()) {
+        throw new LinkageError("the field name is not an interned string");
+      }
+
+      // 2. find static field
       var declaringClass = lookup.lookupClass();
       var field = Arrays.stream(declaringClass.getDeclaredFields())
           .filter(f -> f.getName().equals(fieldName))
@@ -132,15 +87,18 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
       if (!Modifier.isStatic(fieldModifiers)) {
         throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " is not declared static");
       }
+      if (!Modifier.isPrivate(fieldModifiers)) {
+        throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " is not declared private");
+      }
       if (Modifier.isFinal(fieldModifiers)) {
         throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " should not be declared final");
       }
 
-      // 2. compute value and set field
+      // 3. compute value and set field
       var staticSetter = lookup.findStaticSetter(field.getDeclaringClass(), fieldName, field.getType());
-      var value = computeIfUnbound(computedMap, field.getName(), fieldInit, staticSetter);
+      var value = FieldInitMetafactory.computeIfUnbound(computedMap, field.getName(), fieldInit, staticSetter);
 
-      // 3. install the guard
+      // 4. install the guard
       var target = dropArguments(
           constant(field.getType(), value).asType(methodType(Object.class)),
           0, String.class);
