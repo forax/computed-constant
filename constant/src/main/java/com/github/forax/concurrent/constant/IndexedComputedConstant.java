@@ -44,24 +44,22 @@ record IndexedComputedConstant<V>(List<Object> states, int index, IntFunction<? 
   private Object computeIfUnbound() {
     var states = this.states;
     var elements = (Object[]) UNSAFE.getObject(states, ELEMENTS_OFFSET);
-    var state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
-    if (state == null) {
-      lock.lock();
-      try {
-        state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
-        if (state == null) {
-          try {
-            state = wrap(mapper.apply(index));
-          } catch (Throwable t) {
-            state = new State.Error(t);
-          }
-          UNSAFE.putObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE, state);
+
+    lock.lock();
+    try {
+      var state = UNSAFE.getObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE);
+      if (state == null) {
+        try {
+          state = wrap(mapper.apply(index));
+        } catch (Throwable t) {
+          state = new State.Error(t);
         }
-      } finally {
-        lock.unlock();
+        UNSAFE.putObjectVolatile(elements, ELEMENTS_BASE_OFFSET + index * ELEMENT_INDEX_SCALE, state);
       }
+      return state;
+    } finally {
+      lock.unlock();
     }
-    return state;
   }
 
   @Override

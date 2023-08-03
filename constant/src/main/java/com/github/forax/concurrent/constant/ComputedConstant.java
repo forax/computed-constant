@@ -28,7 +28,6 @@ public sealed interface ComputedConstant<V> extends Supplier<V> permits IndexedC
     return ComputedConstant.<V>ofList(1, __ -> presetSupplier.get()).get(0);
   }
 
-  //static <V> ComputedConstant<V> ofEmpty() {}
   static <V> List<ComputedConstant<V>> ofList(int size, IntFunction<? extends V> presetMapper) {
     Objects.requireNonNull(presetMapper);
     if (size == 0) {
