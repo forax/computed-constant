@@ -6,29 +6,63 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodHandles.Lookup;
 import java.lang.invoke.MutableCallSite;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
+import java.lang.invoke.VarHandle;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static java.lang.invoke.MethodHandles.constant;
 import static java.lang.invoke.MethodHandles.dropArguments;
+import static java.lang.invoke.MethodHandles.exactInvoker;
+import static java.lang.invoke.MethodHandles.foldArguments;
+import static java.lang.invoke.MethodHandles.insertArguments;
 import static java.lang.invoke.MethodType.methodType;
 
-record FieldInitImpl(MethodHandle mh) implements FieldInit {
+record FieldInitImpl(MethodHandle instanceMH, MethodHandle staticMH) implements FieldInit {
 
   public static MethodHandle createStaticMH(Lookup lookup) {
-    var fieldInitData = FieldInitMetafactory.getFieldInitData(lookup);
+    // get shared class data
+    var fieldInitData = FieldInitMetafactory.getFieldInitClassData(lookup);
 
-    var fieldInit = fieldInitData.staticFieldInit(lookup);
-    return new StaticInliningCache(lookup, fieldInit, fieldInitData.computedMap).dynamicInvoker();
+    // get static field init method
+    var staticFieldInit = fieldInitData.staticFieldInit(lookup);
+    return new StaticInliningCache(lookup, staticFieldInit, fieldInitData.computedMap).dynamicInvoker();
+  }
+
+  public static MethodHandle createInstanceMH(Lookup lookup) {
+    // get shared class data
+    var fieldInitData = FieldInitMetafactory.getFieldInitClassData(lookup);
+
+    // get instance field init method
+    var instanceFieldInit = fieldInitData.instanceFieldInit(lookup);
+
+    var instanceMH = new InstanceInliningCache(lookup, instanceFieldInit).dynamicInvoker();
+    return instanceMH.asType(methodType(Object.class, Object.class, String.class));
   }
 
   @Override
   @SuppressWarnings("unchecked")
   public <T> T get(String fieldName) {
+    Objects.requireNonNull(fieldName);
+    if (staticMH == null) {
+      throw new UnsupportedOperationException();
+    }
     try {
-      return (T) mh.invokeExact(fieldName);
+      return (T) staticMH.invokeExact(fieldName);
+    } catch (Throwable e) {
+      throw rethrow(e);
+    }
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  public <T> T get(Object instance, String fieldName) {
+    Objects.requireNonNull(instance);
+    Objects.requireNonNull(fieldName);
+    if (instanceMH == null) {
+      throw new UnsupportedOperationException();
+    }
+    try {
+      return (T) instanceMH.invokeExact(instance, fieldName);
     } catch (Throwable e) {
       throw rethrow(e);
     }
@@ -77,30 +111,14 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
       }
 
       // 2. find static field
-      var declaringClass = lookup.lookupClass();
-      var field = Arrays.stream(declaringClass.getDeclaredFields())
-          .filter(f -> f.getName().equals(fieldName))
-          .findFirst()
-          .orElseThrow(() -> new NoSuchFieldError("no such field " + fieldName + " in " + declaringClass.getName()));
+      var staticVarHandle = FieldInitMetafactory.findStaticVarHandle(lookup, fieldName);
 
-      var fieldModifiers = field.getModifiers();
-      if (!Modifier.isStatic(fieldModifiers)) {
-        throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " is not declared static");
-      }
-      if (!Modifier.isPrivate(fieldModifiers)) {
-        throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " is not declared private");
-      }
-      if (Modifier.isFinal(fieldModifiers)) {
-        throw new NoSuchFieldError("field " + fieldName + " in " + declaringClass.getName() + " should not be declared final");
-      }
-
-      // 3. compute value and set field
-      var staticSetter = lookup.findStaticSetter(field.getDeclaringClass(), fieldName, field.getType());
-      var value = FieldInitMetafactory.computeIfUnbound(computedMap, field.getName(), fieldInit, staticSetter);
+      // 3. compute the value
+      var value = FieldInitMetafactory.computeStaticIfUnbound(computedMap, fieldName, fieldInit, staticVarHandle);
 
       // 4. install the guard
       var target = dropArguments(
-          constant(field.getType(), value).asType(methodType(Object.class)),
+          constant(Object.class, value),
           0, String.class);
       var test = STRING_CHECK.bindTo(fieldName);
       var guard = MethodHandles.guardWithTest(test,
@@ -108,6 +126,58 @@ record FieldInitImpl(MethodHandle mh) implements FieldInit {
           new StaticInliningCache(lookup, fieldInit, computedMap).dynamicInvoker());
       setTarget(guard);
       return value;
+    }
+  }
+
+  private static final class InstanceInliningCache extends MutableCallSite {
+    private static final MethodHandle STRING_CHECK, INSTANCE_FALLBACK;
+    static {
+      var lookup = MethodHandles.lookup();
+      try {
+        STRING_CHECK = lookup.findStatic(InstanceInliningCache.class, "stringCheck",
+            methodType(boolean.class, String.class, Object.class, String.class));
+        INSTANCE_FALLBACK = lookup.findVirtual(InstanceInliningCache.class, "instanceFallback",
+            methodType(MethodHandle.class, Object.class, String.class));
+      } catch (NoSuchMethodException | IllegalAccessException e) {
+        throw new AssertionError(e);
+      }
+    }
+
+    private final Lookup lookup;
+    private final MethodHandle fieldInit;
+
+    public InstanceInliningCache(Lookup lookup, MethodHandle fieldInit) {
+      super(fieldInit.type());
+      this.lookup = lookup;
+      this.fieldInit = fieldInit;
+      var fallback = INSTANCE_FALLBACK.bindTo(this).asType(methodType(MethodHandle.class, type().parameterType(0), String.class));
+      setTarget(foldArguments(exactInvoker(type()), fallback));
+    }
+
+    private static boolean stringCheck(String expected, Object instance, String argument) {
+      return expected == argument;
+    }
+
+    private MethodHandle instanceFallback(Object instance, String fieldName) throws Throwable {
+      // 1. fieldName is a constant string ?
+      if (fieldName != fieldName.intern()) {
+        throw new LinkageError("the field name is not an interned string");
+      }
+
+      // 2. find instance field
+      var instanceVarHandle = FieldInitMetafactory.findInstanceVarHandle(lookup, fieldName);
+
+      // 3. install the guard
+      var receiverType = type().parameterType(0);
+      var target = insertArguments(FieldInitMetafactory.COMPUTE_INSTANCE_IF_UNBOUND, 2, fieldInit, instanceVarHandle)
+          .asType(methodType(Object.class, receiverType, String.class));
+      var test = STRING_CHECK.bindTo(fieldName)
+          .asType(methodType(boolean.class, receiverType, String.class));
+      var guard = MethodHandles.guardWithTest(test,
+          target,
+          new InstanceInliningCache(lookup, fieldInit).dynamicInvoker());
+      setTarget(guard);
+      return target;
     }
   }
 }

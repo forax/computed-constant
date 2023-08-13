@@ -16,7 +16,7 @@ public class FieldInitTest {
     public void get() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static String X;
+        private static volatile String X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -30,7 +30,7 @@ public class FieldInitTest {
     public void getByte() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static byte X;
+        private static volatile Byte X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -44,7 +44,7 @@ public class FieldInitTest {
     public void getChar() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static char X;
+        private static volatile Character X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -58,7 +58,7 @@ public class FieldInitTest {
     public void getShort() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static short X;
+        private static volatile Short X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -72,7 +72,7 @@ public class FieldInitTest {
     public void getInt() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static int X;
+        private static volatile Integer X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -86,7 +86,7 @@ public class FieldInitTest {
     public void getFloat() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static double X;
+        private static volatile Float X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -100,7 +100,7 @@ public class FieldInitTest {
     public void getLong() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static long X;
+        private static volatile Long X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -114,7 +114,7 @@ public class FieldInitTest {
     public void getDouble() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static double X;
+        private static volatile Double X;
 
         private static Object $staticFieldInit$(String fieldName) {
           assertEquals("X", fieldName);
@@ -128,8 +128,8 @@ public class FieldInitTest {
     public void getSeveral() {
       class Bar {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static String A;
-        private static int B;
+        private static volatile String A;
+        private static volatile Integer B;
 
         private static Object $staticFieldInit$(String fieldName) {
           return switch (fieldName) {
@@ -171,10 +171,10 @@ public class FieldInitTest {
     }
 
     @Test
-    public void fieldDeclaredFinal() {
+    public void fieldDeclaredNotVolatile() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        final String X = "";
+        private String X;
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new AssertionError();
@@ -187,7 +187,7 @@ public class FieldInitTest {
     public void fieldDeclaredNotPrivate() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        static String X;
+        static volatile String X;
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new AssertionError();
@@ -200,7 +200,7 @@ public class FieldInitTest {
     public void fieldDeclaredStaticFinal() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        final String X = "";
+        private static final String X = "";
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new AssertionError();
@@ -213,7 +213,7 @@ public class FieldInitTest {
     public void noMethodStaticFieldInit() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static int X;
+        private static volatile Integer X;
       }
       assertThrows(NoSuchMethodError.class, () -> Foo.FIELD_INIT.get("X"));
     }
@@ -222,7 +222,7 @@ public class FieldInitTest {
     public void methodStaticFieldInitFailsWithAnException() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static int X;
+        private static volatile Integer X;
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new RuntimeException("oops");
@@ -238,7 +238,7 @@ public class FieldInitTest {
     public void methodStaticFieldInitFailsWithAnError() {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static int X;
+        private static volatile Integer X;
 
         private static Object $staticFieldInit$(String fieldName) {
           throw new Error("oops");
@@ -249,11 +249,26 @@ public class FieldInitTest {
       assertSame(e, e2);
     }
 
+    @Test
+    public void methodStaticFieldReturnNull() {
+      class Foo {
+        private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
+        private static volatile Integer X;
+
+        private static Object $staticFieldInit$(String fieldName) {
+          return null;
+        }
+      }
+      var e = assertThrows(NullPointerException.class, () -> Foo.FIELD_INIT.get("X"));
+      var e2 = assertThrows(NullPointerException.class, () -> Foo.FIELD_INIT.get("X"));
+      assertSame(e, e2);
+    }
+
 
     private void testWithALotOfThreads() throws InterruptedException {
       class Foo {
         private static final FieldInit FIELD_INIT = FieldInit.ofStatic(lookup());
-        private static Thread constant;
+        private static volatile Thread constant;
 
         private static Object $staticFieldInit$(String fieldName) {
           return switch (fieldName) {
@@ -290,5 +305,21 @@ public class FieldInitTest {
     }
   }
 
+  @Nested
+  public class InstanceField {
+    @Test
+    public void get() {
+      class Foo {
+        private static final FieldInit FIELD_INIT = FieldInit.ofInstance(lookup());
+        private volatile String X;
 
+        private Object $instanceFieldInit$(String fieldName) {
+          assertEquals("X", fieldName);
+          return "text";
+        }
+      }
+      var foo = new Foo();
+      assertEquals("text", Foo.FIELD_INIT.get(foo, "X"));
+    }
+  }
 }

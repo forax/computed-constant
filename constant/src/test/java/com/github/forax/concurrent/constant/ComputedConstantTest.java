@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public final class ComputedConstantTest {
 
   @Nested
-  class ComputedConstants {
+  public class ComputedConstants {
     @Test
     public void get() {
       var constant = ComputedConstant.of(() -> 42);
@@ -200,7 +200,7 @@ public final class ComputedConstantTest {
   }
 
   @Nested
-  class ComputedConstantList {
+  public class ComputedConstantList {
     @Test
     public void ofList() {
       var count = 1_000;

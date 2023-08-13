@@ -12,32 +12,35 @@ import org.objectweb.asm.MethodVisitor;
 
 import java.io.IOException;
 import java.lang.constant.MethodTypeDesc;
+import java.lang.invoke.CallSite;
 import java.lang.invoke.MethodHandleInfo;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodHandles.Lookup;
+import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Set;
 
 import static java.lang.invoke.MethodType.methodType;
-import static org.objectweb.asm.Opcodes.ACONST_NULL;
 import static org.objectweb.asm.Opcodes.ASM9;
+import static org.objectweb.asm.Opcodes.CHECKCAST;
 import static org.objectweb.asm.Opcodes.H_INVOKESTATIC;
 import static org.objectweb.asm.Opcodes.INVOKEINTERFACE;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
 import static org.objectweb.asm.Opcodes.POP;
+import static org.objectweb.asm.Opcodes.SWAP;
 
 public class Rewriter {
   private static final String FIELD_INIT_INTERNAL_NAME = FieldInit.class.getName().replace('.', '/');
   private static final String FIELD_INIT_METAFACTORY_INTERNAL_NAME = FieldInitMetafactory.class.getName().replace('.', '/');
-  private static final Set<String> GET_NAMES;
+  private static final Set<String> STATIC_GET_NAMES, INSTANCE_GET_NAMES;
 
-  private static final String OF_STATIC;
-  private static final String OF_STATIC_DESCRIPTOR;
-  private static final String OF_NOT_IMPLEMENTED;
+  private static final String OF, OF_STATIC, OF_INSTANCE, OF_NOT_IMPLEMENTED;
+  private static final String OF_DESCRIPTOR;
 
-  private static final Handle BSM;
+  private static final Handle STATIC_INIT_BSM;
+  private static final Handle INSTANCE_INIT_BSM;
 
   static {
     var lookup = MethodHandles.lookup();
@@ -56,7 +59,7 @@ public class Rewriter {
       throw new AssertionError(e);
     }
 
-    GET_NAMES = Set.of(
+    STATIC_GET_NAMES = Set.of(
         get.getName() + get.getMethodType().descriptorString(),
         getBoolean.getName() + getBoolean.getMethodType().descriptorString(),
         getByte.getName() + getByte.getMethodType().descriptorString(),
@@ -68,31 +71,73 @@ public class Rewriter {
         getDouble.getName() + getDouble.getMethodType().descriptorString()
     );
 
-    MethodHandleInfo ofStatic, ofNotImplemented;
+    MethodHandleInfo getInstance, getBooleanInstance, getByteInstance, getShortInstance,
+        getCharInstance, getIntInstance, getLongInstance, getFloatInstance, getDoubleInstance;
     try {
+      getInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "get", methodType(Object.class, Object.class, String.class)));
+      getBooleanInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getBoolean", methodType(double.class, Object.class, String.class)));
+      getByteInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getByte", methodType(byte.class, Object.class, String.class)));
+      getShortInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getShort", methodType(short.class, Object.class, String.class)));
+      getCharInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getChar", methodType(char.class, Object.class, String.class)));
+      getIntInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getInt", methodType(int.class, Object.class, String.class)));
+      getLongInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getLong", methodType(long.class, Object.class, String.class)));
+      getFloatInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getFloat", methodType(float.class, Object.class, String.class)));
+      getDoubleInstance = lookup.revealDirect(lookup.findVirtual(FieldInit.class, "getDouble", methodType(double.class, Object.class, String.class)));
+    } catch (NoSuchMethodException | IllegalAccessException e) {
+      throw new AssertionError(e);
+    }
+
+    INSTANCE_GET_NAMES = Set.of(
+        getInstance.getName() + getInstance.getMethodType().descriptorString(),
+        getBooleanInstance.getName() + getBooleanInstance.getMethodType().descriptorString(),
+        getByteInstance.getName() + getByteInstance.getMethodType().descriptorString(),
+        getShortInstance.getName() + getShortInstance.getMethodType().descriptorString(),
+        getCharInstance.getName() + getCharInstance.getMethodType().descriptorString(),
+        getIntInstance.getName() + getIntInstance.getMethodType().descriptorString(),
+        getLongInstance.getName() + getLongInstance.getMethodType().descriptorString(),
+        getFloatInstance.getName() + getFloatInstance.getMethodType().descriptorString(),
+        getDoubleInstance.getName() + getDoubleInstance.getMethodType().descriptorString()
+    );
+
+    MethodHandleInfo of, ofStatic, ofInstance, ofNotImplemented;
+    try {
+      of = lookup.revealDirect(lookup.findStatic(FieldInit.class, "of",
+          methodType(FieldInit.class, Lookup.class)));
       ofStatic = lookup.revealDirect(lookup.findStatic(FieldInit.class, "ofStatic",
+          methodType(FieldInit.class, Lookup.class)));
+      ofInstance = lookup.revealDirect(lookup.findStatic(FieldInit.class, "ofInstance",
           methodType(FieldInit.class, Lookup.class)));
       ofNotImplemented = lookup.revealDirect(lookup.findStatic(FieldInitMetafactory.class, "ofNotImplemented",
           ofStatic.getMethodType()));
     } catch (NoSuchMethodException | IllegalAccessException e) {
       throw new AssertionError(e);
     }
+    OF_DESCRIPTOR = of.getMethodType().descriptorString();
+    OF = of.getName();
     OF_STATIC = ofStatic.getName();
-    OF_STATIC_DESCRIPTOR = ofStatic.getMethodType().descriptorString();
+    OF_INSTANCE = ofInstance.getName();
     OF_NOT_IMPLEMENTED = ofNotImplemented.getName();
 
-    MethodHandleInfo bsm;
+    MethodHandleInfo staticBSM, instanceBSM;
     try {
-      bsm = lookup.revealDirect(lookup.findStatic(FieldInitMetafactory.class, "staticFieldInit",
+      staticBSM = lookup.revealDirect(lookup.findStatic(FieldInitMetafactory.class, "staticFieldInit",
           methodType(Object.class, Lookup.class, String.class, Class.class)));
+      instanceBSM = lookup.revealDirect(lookup.findStatic(FieldInitMetafactory.class, "instanceFieldInit",
+          methodType(CallSite.class, Lookup.class, String.class, MethodType.class)));
     } catch (NoSuchMethodException | IllegalAccessException e) {
       throw new AssertionError(e);
     }
 
-    BSM = new Handle(H_INVOKESTATIC,
-        bsm.getDeclaringClass().getName().replace('.', '/'),
-        bsm.getName(),
-        bsm.getMethodType().descriptorString(),
+    STATIC_INIT_BSM = new Handle(H_INVOKESTATIC,
+        staticBSM.getDeclaringClass().getName().replace('.', '/'),
+        staticBSM.getName(),
+        staticBSM.getMethodType().descriptorString(),
+        false);
+
+    INSTANCE_INIT_BSM = new Handle(H_INVOKESTATIC,
+        instanceBSM.getDeclaringClass().getName().replace('.', '/'),
+        instanceBSM.getName(),
+        instanceBSM.getMethodType().descriptorString(),
         false);
   }
 
@@ -202,25 +247,38 @@ public class Rewriter {
           @Override
           public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
             if (opcode == INVOKEINTERFACE &&
-                owner.equals(FIELD_INIT_INTERNAL_NAME) &&
-                GET_NAMES.contains(name + descriptor)) {
+                owner.equals(FIELD_INIT_INTERNAL_NAME)) {
 
               if (constant == null) {
                 throw new IllegalStateException("no field name found while parsing " + currentClass + '.' + name + descriptor);
               }
 
-              super.visitInsn(POP);  // pop the String
-              super.visitInsn(POP);  // pop the FieldInit
-              var fieldDescriptor = MethodTypeDesc.ofDescriptor(descriptor).returnType().descriptorString();
-              super.visitLdcInsn(new ConstantDynamic(constant, fieldDescriptor, BSM));
-              changed = true;
-              return;
+              if (STATIC_GET_NAMES.contains(name + descriptor)) {
+                super.visitInsn(POP);  // pop the String
+                super.visitInsn(POP);  // pop the FieldInit
+                var fieldDescriptor = MethodTypeDesc.ofDescriptor(descriptor).returnType().descriptorString();
+                super.visitLdcInsn(new ConstantDynamic(constant, fieldDescriptor, STATIC_INIT_BSM));
+                changed = true;
+                return;
+              }
+              if (INSTANCE_GET_NAMES.contains(name + descriptor)) {
+                super.visitInsn(POP);  // pop the String
+                super.visitInsn(SWAP);
+                super.visitInsn(POP);  // pop the FieldInit
+                super.visitTypeInsn(CHECKCAST, currentClass);
+                var fieldDescriptor = MethodTypeDesc.ofDescriptor(descriptor).returnType().descriptorString();
+                super.visitInvokeDynamicInsn(constant,
+                    "(L" + currentClass + ";)" + fieldDescriptor,
+                    INSTANCE_INIT_BSM);
+                changed = true;
+                return;
+              }
             }
             constant = null;
-            if (opcode == INVOKESTATIC &&
+            if (opcode == INVOKESTATIC && isInterface &&
                 owner.equals(FIELD_INIT_INTERNAL_NAME) &&
-                name.equals(OF_STATIC) &&
-                descriptor.equals(OF_STATIC_DESCRIPTOR)) {
+                (name.equals(OF) || name.equals(OF_STATIC) || name.equals(OF_INSTANCE)) &&
+                descriptor.equals(OF_DESCRIPTOR)) {
               super.visitMethodInsn(opcode, FIELD_INIT_METAFACTORY_INTERNAL_NAME, OF_NOT_IMPLEMENTED, descriptor, false);
               changed = true;
               return;
