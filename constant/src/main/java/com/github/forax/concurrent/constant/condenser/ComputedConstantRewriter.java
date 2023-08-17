@@ -458,7 +458,10 @@ public class ComputedConstantRewriter {
     return Optional.of(writer.toByteArray());
   }
 
-  private static void rewriteAll(Path directory) throws IOException {
+  private static void rewriteAll(Path directory, Optional<Path> outputDirectory) throws IOException {
+    var outputPathDirectory = outputDirectory.orElse(directory);
+    Files.createDirectories(outputPathDirectory);
+
     try(var stream = Files.walk(directory)) {
       for(var path: (Iterable<Path>) stream::iterator) {
         if (path.toString().contains("condenser")) {
@@ -470,24 +473,28 @@ public class ComputedConstantRewriter {
         var content = Files.readAllBytes(path);
         var newContent = transform(content);
         if (newContent.isPresent()) {
-          Files.write(path, newContent.orElseThrow());
-          System.out.println(path + " rewritten");
+          var relativePath = directory.relativize(path);
+          var outputPath = outputPathDirectory.resolve(relativePath);
+          Files.createDirectories(outputPath.getParent());
+          Files.write(outputPath, newContent.orElseThrow());
+          System.out.println(outputPath + " rewritten");
         }
       }
     }
   }
 
-  public static void main(String[] args) throws IOException {
-    if (args.length != 1) {
+  public static void main(String... args) throws IOException {
+    if (args.length == 0 || args.length > 2) {
       System.err.println("""
-        Rewriter directory
-          rewrite all classes in the directory (recursively) to condense FieldInit usages
+        Rewriter: inputDirectory [outputDirectory]
+          rewrite all classes in the directory (recursively) to condense computed constant usages
         """);
       System.exit(1);
       return;
     }
     var directory = Path.of(args[0]);
-    System.out.println("rewrite " + directory);
-    rewriteAll(directory);
+    var outputDirectory = Optional.of(args).filter(__ -> args.length == 2).map(__ -> Path.of(args[1]));
+    System.out.println("rewrite " + directory + outputDirectory.map(d -> " to " + d).orElse(""));
+    rewriteAll(directory, outputDirectory);
   }
 }
